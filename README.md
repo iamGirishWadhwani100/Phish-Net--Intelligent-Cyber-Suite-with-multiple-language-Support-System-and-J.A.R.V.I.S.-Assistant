@@ -17,9 +17,25 @@
 
 ## 📸 Screenshots
 
-| URL Scanner | IP Scanner | JARVIS AI |
-|---|---|---|
-| Real-time VirusTotal scan | AbuseIPDB threat intel | GPT-4o tactical advisory |
+### 🔐 Login & Registration
+| Login | Sign Up |
+|---|---|
+| ![Login](screenshots/login.png) | ![Sign Up](screenshots/sign_up.png) |
+
+### 🏠 Dashboard
+![Dashboard](screenshots/dashboard.png)
+
+### 🛡️ Phishing & Threat Intelligence
+![Phishing & Threats](screenshots/phishing.png)
+
+### 🌐 Network — PCAP Packet Forensics
+![Packet Inspection](screenshots/Packet_Inspection.png)
+
+### 🔑 Cryptographic Tools
+![Cryptographic](screenshots/cryptographic.png)
+
+### 🧠 J.A.R.V.I.S. — GPT-4o AI Advisory
+![JARVIS](screenshots/jarvis.png)
 
 ---
 
