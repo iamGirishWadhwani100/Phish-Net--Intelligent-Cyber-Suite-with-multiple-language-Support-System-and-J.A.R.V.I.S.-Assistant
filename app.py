@@ -10,6 +10,13 @@ Team:     Cases, notes, shared audit log
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import hashlib, socket, base64, json, re as _re, ssl, html, sqlite3, os
+try:
+    import certifi
+    SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
+except ImportError:
+    SSL_CONTEXT = ssl.create_default_context()
+    SSL_CONTEXT.check_hostname = False
+    SSL_CONTEXT.verify_mode = ssl.CERT_NONE
 import urllib.request, urllib.error, urllib.parse
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
@@ -377,52 +384,106 @@ def run_tool(tool_code):
 
         elif tool_code == "url":
             target = payload if payload.startswith("http") else "https://" + payload
-            if not VT_API_KEY:
-                return jsonify({"status": "error", "result": "VT_API_KEY not set in .env"})
-            url_id = base64.urlsafe_b64encode(target.encode()).decode().strip("=")
-            req = urllib.request.Request(f"https://www.virustotal.com/api/v3/urls/{url_id}")
-            req.add_header("x-apikey", VT_API_KEY)
-            ctx = ssl.create_default_context()  # Proper SSL — no verification bypass
+            vt_key = VT_API_KEY.strip()
+            if not vt_key:
+                return jsonify({"status": "error", "result": "[-] VT_API_KEY not set in .env\nGet a free key at: https://www.virustotal.com/gui/my-apikey"})
+            # SSL_CONTEXT defined at startup
+
+            # Step 1: Submit URL to VT for scanning
+            submit_req = urllib.request.Request(
+                "https://www.virustotal.com/api/v3/urls",
+                data=urllib.parse.urlencode({"url": target}).encode(),
+                method="POST"
+            )
+            submit_req.add_header("x-apikey", vt_key)
+            submit_req.add_header("Content-Type", "application/x-www-form-urlencoded")
             try:
-                with urllib.request.urlopen(req, context=ctx, timeout=12) as resp:
-                    vt    = json.loads(resp.read().decode())
+                with urllib.request.urlopen(submit_req, context=SSL_CONTEXT, timeout=15) as sresp:
+                    submit_data = json.loads(sresp.read().decode())
+                    analysis_id = submit_data["data"]["id"]
+            except urllib.error.HTTPError as e:
+                err_body = e.read().decode()
+                result = f"[-] VT Submit Error: HTTP {e.code}\n{err_body[:300]}"
+                log_action(email, tool_code.upper(), payload[:100], "vt_submit_error", request.remote_addr)
+                return jsonify({"status": "error", "result": result})
+
+            # Step 2: Poll until VT finishes scanning (up to 20s)
+            import time as _time
+            analysis_req = urllib.request.Request(
+                f"https://www.virustotal.com/api/v3/analyses/{analysis_id}"
+            )
+            analysis_req.add_header("x-apikey", vt_key)
+            vt = None
+            for attempt in range(6):           # poll up to 6x with 4s gaps = 24s max
+                _time.sleep(4)
+                with urllib.request.urlopen(analysis_req, context=SSL_CONTEXT, timeout=15) as aresp:
+                    vt = json.loads(aresp.read().decode())
+                status = vt.get("data", {}).get("attributes", {}).get("status", "")
+                if status == "completed":
+                    break
+            try:
                     attrs = vt["data"]["attributes"]
-                    stats = attrs.get("last_analysis_stats", {})
+                    stats = attrs.get("stats", {})
                     mal   = stats.get("malicious", 0)
                     sus   = stats.get("suspicious", 0)
                     clean = stats.get("harmless", 0) + stats.get("undetected", 0)
                     total = mal + sus + clean
                     score   = round(((mal + sus) / total) * 100) if total else 0
-                    verdict = "CRITICAL THREAT" if mal > 2 else ("SUSPICIOUS" if sus > 0 else "CLEAN")
-                    cats    = ", ".join(list(attrs.get("categories", {}).values())[:3]) or "N/A"
-                    result  = (f"[*] VIRUSTOTAL REAL-TIME SCAN\nTARGET: {target}\n"
-                               f"\nEngines:    {total}\nMalicious:  {mal}\nSuspicious: {sus}\nClean:      {clean}"
-                               f"\nRisk Score: {score}/100\nCategories: {cats}\n\nVERDICT: {verdict}")
+                    verdict = "⚠ CRITICAL THREAT" if mal > 2 else ("⚡ SUSPICIOUS" if sus > 0 else "✓  CLEAN")
+                    result  = (f"[*] VIRUSTOTAL SCAN COMPLETE\nTARGET: {target}\n"
+                               f"{'─'*45}\n"
+                               f"Engines Run:  {total}\n"
+                               f"Malicious:    {mal}\n"
+                               f"Suspicious:   {sus}\n"
+                               f"Clean:        {clean}\n"
+                               f"Risk Score:   {score}/100\n"
+                               f"{'─'*45}\n"
+                               f"VERDICT: {verdict}")
             except urllib.error.HTTPError as e:
-                if e.code == 404:
-                    result = f"[*] URL not in VT database yet.\nTARGET: {target}\nSTATUS: UNKNOWN"
-                else:
-                    result = f"[-] VirusTotal API Error: HTTP {e.code}"
+                err_body = e.read().decode()
+                result = f"[-] VT Analysis Error: HTTP {e.code}\n{err_body[:300]}"
 
         elif tool_code == "ip_scan":
-            if not ABUSEIPDB_KEY:
-                return jsonify({"status": "error", "result": "ABUSEIPDB_KEY not set in .env"})
-            url = f"https://api.abuseipdb.com/api/v2/check?ipAddress={urllib.parse.quote(payload)}&maxAgeInDays=90"
-            req = urllib.request.Request(url)
-            req.add_header("Key", ABUSEIPDB_KEY)
+            abuse_key = ABUSEIPDB_KEY.strip()
+            if not abuse_key:
+                return jsonify({"status": "error", "result": "[-] ABUSEIPDB_KEY not set in .env\nGet a free key at: https://www.abuseipdb.com/account/api"})
+            # Validate IP format loosely before sending
+            ip_clean = payload.strip()
+            ip_url = f"https://api.abuseipdb.com/api/v2/check?ipAddress={urllib.parse.quote(ip_clean)}&maxAgeInDays=90&verbose"
+            req = urllib.request.Request(ip_url)
+            req.add_header("Key", abuse_key)
             req.add_header("Accept", "application/json")
-            with urllib.request.urlopen(req, timeout=12) as resp:
-                d       = json.loads(resp.read().decode())["data"]
-                score   = d.get("abuseConfidenceScore", 0)
-                country = d.get("countryCode", "?")
-                isp     = d.get("isp", "Unknown")
-                domain  = d.get("domain", "Unknown")
-                reports = d.get("totalReports", 0)
-                usage   = d.get("usageType", "Unknown")
-                verdict = "CRITICAL THREAT" if score > 75 else ("SUSPICIOUS" if score > 25 else "CLEAN")
-                result  = (f"[*] ABUSEIPDB REAL-TIME REPORT\nIP: {payload}\n"
-                           f"\nCountry:  {country}  |  ISP: {isp}\nDomain:   {domain}\nUsage:    {usage}"
-                           f"\n\nAbuse Score: {score}/100\nTotal Reports: {reports}\n\nVERDICT: {verdict}")
+            req.add_header("User-Agent", "PhishNet-SOC/1.0")
+            try:
+                with urllib.request.urlopen(req, context=SSL_CONTEXT, timeout=15) as resp:
+                    raw  = json.loads(resp.read().decode())
+                    d    = raw.get("data", {})
+                    score   = d.get("abuseConfidenceScore", 0)
+                    country = d.get("countryCode", "?")
+                    isp     = d.get("isp", "Unknown")
+                    domain  = d.get("domain", "N/A")
+                    reports = d.get("totalReports", 0)
+                    usage   = d.get("usageType", "Unknown")
+                    is_tor  = d.get("isTor", False)
+                    is_pub  = d.get("isPublic", True)
+                    verdict = "⚠ CRITICAL THREAT" if score > 75 else ("⚡ SUSPICIOUS" if score > 25 else "✓  CLEAN")
+                    result  = (f"[*] ABUSEIPDB REAL-TIME REPORT\n"
+                               f"IP: {ip_clean}\n"
+                               f"{'─'*45}\n"
+                               f"Country:       {country}\n"
+                               f"ISP:           {isp}\n"
+                               f"Domain:        {domain}\n"
+                               f"Usage Type:    {usage}\n"
+                               f"Public IP:     {'Yes' if is_pub else 'No'}\n"
+                               f"Tor Exit Node: {'⚠ YES' if is_tor else 'No'}\n"
+                               f"{'─'*45}\n"
+                               f"Abuse Score:   {score}/100\n"
+                               f"Total Reports: {reports}\n"
+                               f"{'─'*45}\n"
+                               f"VERDICT: {verdict}")
+            except urllib.error.HTTPError as e:
+                err_body = e.read().decode()
+                result = f"[-] AbuseIPDB Error: HTTP {e.code}\nDetails: {err_body[:300]}"
 
         elif tool_code == "dns":
             domain = payload.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
@@ -444,8 +505,14 @@ def run_tool(tool_code):
         log_action(email, tool_code.upper(), payload[:100], "ok", request.remote_addr)
         return jsonify({"status": "success", "result": result})
 
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode()
+        return jsonify({"status": "error", "result": f"[-] HTTP {e.code} from external API:\n{err_body[:400]}"})
+    except urllib.error.URLError as e:
+        return jsonify({"status": "error", "result": f"[-] Network error (check internet connection):\n{str(e.reason)}"})
     except Exception as e:
-        return jsonify({"status": "error", "result": f"Error: {html.escape(repr(e))}"})
+        import traceback
+        return jsonify({"status": "error", "result": f"[-] Unexpected error: {html.escape(str(e))}\n{html.escape(traceback.format_exc()[-400:])}"})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
