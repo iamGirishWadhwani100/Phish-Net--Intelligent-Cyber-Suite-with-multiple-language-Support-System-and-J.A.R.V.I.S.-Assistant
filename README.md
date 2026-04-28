@@ -29,7 +29,7 @@
 ![Phishing & Threats](assets/phishing.png)
 
 ### 🌐 Network — PCAP Packet Forensics
-![Packet Inspection](assets/Packet_Inspection.png)
+![Packet Inspection](assets/Packet Inspection.png)
 
 ### 🔑 Cryptographic Tools
 ![Cryptographic](assets/cryptographic.png)
