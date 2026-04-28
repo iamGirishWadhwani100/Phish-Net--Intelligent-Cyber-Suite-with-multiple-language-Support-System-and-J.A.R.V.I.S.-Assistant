@@ -20,22 +20,22 @@
 ### 🔐 Login & Registration
 | Login | Sign Up |
 |---|---|
-| ![Login](screenshots/login.png) | ![Sign Up](screenshots/sign_up.png) |
+| ![Login](assets/login.png) | ![Sign Up](assets/sign_up.png) |
 
 ### 🏠 Dashboard
-![Dashboard](screenshots/dashboard.png)
+![Dashboard](assets/dashboard.png)
 
 ### 🛡️ Phishing & Threat Intelligence
-![Phishing & Threats](screenshots/phishing.png)
+![Phishing & Threats](assets/phishing.png)
 
 ### 🌐 Network — PCAP Packet Forensics
-![Packet Inspection](screenshots/Packet_Inspection.png)
+![Packet Inspection](assets/Packet_Inspection.png)
 
 ### 🔑 Cryptographic Tools
-![Cryptographic](screenshots/cryptographic.png)
+![Cryptographic](assets/cryptographic.png)
 
 ### 🧠 J.A.R.V.I.S. — GPT-4o AI Advisory
-![JARVIS](screenshots/jarvis.png)
+![JARVIS](assets/jarvis.png)
 
 ---
 
